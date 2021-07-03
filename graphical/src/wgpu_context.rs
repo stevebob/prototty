@@ -90,6 +90,8 @@ struct WgpuContext {
     window_size: winit::dpi::LogicalSize<f64>,
     scale_factor: f64,
     modifier_state: winit::event::ModifiersState,
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
 }
 
 #[repr(C)]
@@ -125,30 +127,36 @@ struct UnderlineUniforms {
     underline_top_offset_cell_ratio: f32,
 }
 
-async fn init_device(
-    window: &winit::window::Window,
-) -> Result<
-    (
-        wgpu::Instance,
-        wgpu::Device,
-        wgpu::Queue,
-        wgpu::Adapter,
-        wgpu::Surface,
-    ),
-    ContextBuildError,
-> {
-    let backend = wgpu::BackendBit::all();
+struct Setup {
+    window: winit::window::Window,
+    event_loop: winit::event_loop::EventLoop<()>,
+    instance: wgpu::Instance,
+    size: winit::dpi::PhysicalSize<u32>,
+    surface: wgpu::Surface,
+    adapter: wgpu::Adapter,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+}
+
+async fn setup() -> Setup {
+    let event_loop = winit::event_loop::EventLoop::new();
+    let builder = winit::window::WindowBuilder::new();
+    let window = builder.build(&event_loop).unwrap();
+    let backend = wgpu::BackendBit::GL;
+    let power_preference = wgpu::PowerPreference::default();
     let instance = wgpu::Instance::new(backend);
-    let surface = unsafe { instance.create_surface(window) };
+    let (size, surface) = unsafe {
+        let size = window.inner_size();
+        let surface = instance.create_surface(&window);
+        (size, surface)
+    };
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
+            power_preference,
             compatible_surface: Some(&surface),
         })
         .await
-        .ok_or(ContextBuildError::FailedToRequestGraphicsAdapter)?;
-    let adapter_info = adapter.get_info();
-    log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
+        .expect("No suitable GPU adapters found on the system!");
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
@@ -159,8 +167,17 @@ async fn init_device(
             None,
         )
         .await
-        .map_err(ContextBuildError::FailedToRequestDevice)?;
-    Ok((instance, device, queue, adapter, surface))
+        .expect("Unable to find a suitable GPU adapter!");
+    Setup {
+        window,
+        event_loop,
+        instance,
+        size,
+        surface,
+        adapter,
+        device,
+        queue,
+    }
 }
 
 impl WgpuContext {
@@ -179,6 +196,11 @@ impl WgpuContext {
     }
     fn new(
         window: &winit::window::Window,
+        mut device: wgpu::Device,
+        queue: wgpu::Queue,
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
+        surface: wgpu::Surface,
         size_context: &SizeContext,
         grid_size: Size,
         font_bytes: FontBytes,
@@ -190,8 +212,6 @@ impl WgpuContext {
         let scale_factor = window.scale_factor();
         let physical_size = window.inner_size();
         let window_size: winit::dpi::LogicalSize<f64> = physical_size.to_logical(scale_factor);
-        let (_instance, mut device, queue, adapter, surface) =
-            futures_executor::block_on(init_device(&window))?;
         let swapchain_format = adapter
             .get_swap_chain_preferred_format(&surface)
             .expect("Failed to find compatible texture format");
@@ -322,7 +342,7 @@ impl WgpuContext {
                             shader_location: 1,
                         },
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32,
+                            format: wgpu::VertexFormat::Sint32,
                             offset: 24,
                             shader_location: 2,
                         },
@@ -359,6 +379,8 @@ impl WgpuContext {
             window_size,
             scale_factor,
             modifier_state,
+            instance,
+            adapter,
         })
     }
     fn render_background(&mut self) {
@@ -552,20 +574,16 @@ impl Context {
             resizable,
         }: ContextDescriptor,
     ) -> Result<Self, ContextBuildError> {
-        let event_loop = winit::event_loop::EventLoop::new();
-        let window_builder = winit::window::WindowBuilder::new().with_title(title);
-        let window_builder = {
-            let logical_size =
-                winit::dpi::LogicalSize::new(window_dimensions.width, window_dimensions.height);
-            window_builder
-                .with_inner_size(logical_size)
-                .with_min_inner_size(logical_size)
-                .with_max_inner_size(logical_size)
-                .with_resizable(resizable)
-        };
-        let window = window_builder
-            .build(&event_loop)
-            .map_err(ContextBuildError::FailedToBuildWindow)?;
+        let Setup {
+            window,
+            event_loop,
+            instance,
+            size,
+            surface,
+            adapter,
+            device,
+            queue,
+        } = pollster::block_on(setup());
         let size_context = SizeContext {
             font_source_scale: ab_glyph::PxScale {
                 x: font_source_dimensions.width,
@@ -578,7 +596,17 @@ impl Context {
             native_window_dimensions: window_dimensions,
         };
         let grid_size = size_context.grid_size();
-        let wgpu_context = WgpuContext::new(&window, &size_context, grid_size, font_bytes)?;
+        let wgpu_context = WgpuContext::new(
+            &window,
+            device,
+            queue,
+            instance,
+            adapter,
+            surface,
+            &size_context,
+            grid_size,
+            font_bytes,
+        )?;
         log::info!("grid size: {:?}", grid_size);
         let window = Arc::new(window);
         Ok(Context {
