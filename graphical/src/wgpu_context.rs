@@ -118,11 +118,6 @@ struct GlobalUniforms {
     cell_size_relative_to_window: [f32; 2],
     offset_to_centre: [f32; 2],
     grid_width: u32,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, zerocopy::AsBytes, zerocopy::FromBytes)]
-struct UnderlineUniforms {
     underline_width_cell_ratio: f32,
     underline_top_offset_cell_ratio: f32,
 }
@@ -142,7 +137,7 @@ async fn setup() -> Setup {
     let event_loop = winit::event_loop::EventLoop::new();
     let builder = winit::window::WindowBuilder::new();
     let window = builder.build(&event_loop).unwrap();
-    let backend = wgpu::BackendBit::PRIMARY;
+    let backend = wgpu::BackendBit::GL;
     let power_preference = wgpu::PowerPreference::default();
     let instance = wgpu::Instance::new(backend);
     let (size, surface) = unsafe {
@@ -255,66 +250,30 @@ impl WgpuContext {
             }),
             &[global_uniforms],
         );
-        let underline_uniforms_size = mem::size_of::<UnderlineUniforms>() as wgpu::BufferAddress;
-        let underline_uniforms = UnderlineUniforms {
-            underline_width_cell_ratio: size_context.underline_width as f32,
-            underline_top_offset_cell_ratio: size_context.underline_top_offset as f32,
-        };
-        let underline_uniforms_buffer = populate_and_finish_buffer(
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: 1 * underline_uniforms_size,
-                usage: wgpu::BufferUsage::UNIFORM,
-                mapped_at_creation: true,
-            }),
-            &[underline_uniforms],
-        );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStage::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStage::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+                count: None,
+            }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &global_uniforms_buffer,
-                        offset: 0,
-                        size: None,
-                    }),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &underline_uniforms_buffer,
-                        offset: 0,
-                        size: None,
-                    }),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &global_uniforms_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
@@ -526,6 +485,8 @@ impl SizeContext {
                 2. * (pixel_offset_to_centre.height as f32 / window_dimensions.height as f32),
             ],
             grid_width: self.grid_size().width(),
+            underline_width_cell_ratio: self.underline_width as f32,
+            underline_top_offset_cell_ratio: self.underline_top_offset as f32,
         }
     }
 }
