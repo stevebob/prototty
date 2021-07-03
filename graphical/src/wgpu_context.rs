@@ -603,12 +603,12 @@ impl Context {
             mut gamepad,
         } = self;
         let mut frame_instant = Instant::now();
+        let mut last_update_inst = Instant::now();
         let mut exited = false;
         log::info!("Entering main event loop");
         let mut current_window_dimensions = size_context.native_window_dimensions;
         let mut staging_belt = wgpu::util::StagingBelt::new(1024);
-        let mut local_pool = futures::executor::LocalPool::new();
-        let local_spawner = local_pool.spawner();
+        let executor = async_executor::LocalExecutor::new();
         event_loop.run(move |event, _, control_flow| {
             let _ = (&instance, &adapter); // force ownership by the closure
             if exited {
@@ -758,19 +758,26 @@ impl Context {
                             )
                             .unwrap();
                         staging_belt.finish();
-                        wgpu_context.queue.submit(Some(encoder.finish()));
-                        use futures::task::SpawnExt;
-                        local_spawner
-                            .spawn(staging_belt.recall())
-                            .expect("Recall staging belt");
-                        local_pool.run_until_stalled();
+                        wgpu_context.queue.submit(std::iter::once(encoder.finish()));
+                        executor.spawn(staging_belt.recall()).detach();
                     } else {
                         log::warn!("timeout when acquiring next swapchain texture");
                         thread::sleep(Duration::from_millis(100));
                     }
                 }
-                winit::event::Event::MainEventsCleared => {
-                    window.request_redraw();
+                winit::event::Event::RedrawEventsCleared => {
+                    let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
+                    let time_since_last_frame = last_update_inst.elapsed();
+                    if time_since_last_frame >= target_frametime {
+                        window.request_redraw();
+                        last_update_inst = Instant::now();
+                    } else {
+                        *control_flow = winit::event_loop::ControlFlow::WaitUntil(
+                            Instant::now() + target_frametime - time_since_last_frame,
+                        );
+                    }
+
+                    while executor.try_tick() {}
                 }
                 _ => (),
             }
