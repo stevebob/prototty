@@ -90,8 +90,6 @@ struct WgpuContext {
     window_size: winit::dpi::LogicalSize<f64>,
     scale_factor: f64,
     modifier_state: winit::event::ModifiersState,
-    instance: wgpu::Instance,
-    adapter: wgpu::Adapter,
 }
 
 #[repr(C)]
@@ -126,25 +124,29 @@ struct Setup {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
     instance: wgpu::Instance,
-    size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
 }
 
-async fn setup() -> Setup {
+async fn setup(title: &str, window_dimensions: Dimensions<NumPixels>, resizable: bool) -> Setup {
     let event_loop = winit::event_loop::EventLoop::new();
-    let builder = winit::window::WindowBuilder::new();
-    let window = builder.build(&event_loop).unwrap();
+    let window_builder = winit::window::WindowBuilder::new().with_title(title);
+    let window_builder = {
+        let logical_size =
+            winit::dpi::LogicalSize::new(window_dimensions.width, window_dimensions.height);
+        window_builder
+            .with_inner_size(logical_size)
+            .with_min_inner_size(logical_size)
+            .with_max_inner_size(logical_size)
+            .with_resizable(resizable)
+    };
+    let window = window_builder.build(&event_loop).unwrap();
     let backend = wgpu::BackendBit::GL;
     let power_preference = wgpu::PowerPreference::default();
     let instance = wgpu::Instance::new(backend);
-    let (size, surface) = unsafe {
-        let size = window.inner_size();
-        let surface = instance.create_surface(&window);
-        (size, surface)
-    };
+    let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference,
@@ -167,7 +169,6 @@ async fn setup() -> Setup {
         window,
         event_loop,
         instance,
-        size,
         surface,
         adapter,
         device,
@@ -193,8 +194,7 @@ impl WgpuContext {
         window: &winit::window::Window,
         mut device: wgpu::Device,
         queue: wgpu::Queue,
-        instance: wgpu::Instance,
-        adapter: wgpu::Adapter,
+        adapter: &wgpu::Adapter,
         surface: wgpu::Surface,
         size_context: &SizeContext,
         grid_size: Size,
@@ -338,8 +338,6 @@ impl WgpuContext {
             window_size,
             scale_factor,
             modifier_state,
-            instance,
-            adapter,
         })
     }
     fn render_background(&mut self) {
@@ -498,6 +496,8 @@ pub struct Context {
     size_context: SizeContext,
     input_context: InputContext,
     text_buffer: String,
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
     #[cfg(feature = "gamepad")]
     gamepad: GamepadContext,
 }
@@ -539,12 +539,11 @@ impl Context {
             window,
             event_loop,
             instance,
-            size,
             surface,
             adapter,
             device,
             queue,
-        } = pollster::block_on(setup());
+        } = pollster::block_on(setup(title.as_str(), window_dimensions, resizable));
         let size_context = SizeContext {
             font_source_scale: ab_glyph::PxScale {
                 x: font_source_dimensions.width,
@@ -561,8 +560,7 @@ impl Context {
             &window,
             device,
             queue,
-            instance,
-            adapter,
+            &adapter,
             surface,
             &size_context,
             grid_size,
@@ -577,6 +575,8 @@ impl Context {
             size_context,
             input_context: Default::default(),
             text_buffer: String::new(),
+            instance,
+            adapter,
             #[cfg(feature = "gamepad")]
             gamepad: GamepadContext::new(),
         })
@@ -597,6 +597,8 @@ impl Context {
             size_context,
             mut input_context,
             mut text_buffer,
+            instance,
+            adapter,
             #[cfg(feature = "gamepad")]
             mut gamepad,
         } = self;
@@ -608,6 +610,7 @@ impl Context {
         let mut local_pool = futures::executor::LocalPool::new();
         let local_spawner = local_pool.spawner();
         event_loop.run(move |event, _, control_flow| {
+            let _ = (&instance, &adapter); // force ownership by the closure
             if exited {
                 *control_flow = winit::event_loop::ControlFlow::Exit;
                 return;
