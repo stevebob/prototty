@@ -4,7 +4,7 @@ layout(location = 0) in vec3 a_BackgroundColour;
 layout(location = 1) in vec3 a_ForegroundColour;
 layout(location = 2) in int a_Underline;
 
-layout(location = 0) flat out vec3 v_BackgroundColour;
+layout(location = 0) out vec3 v_BackgroundColour;
 layout(location = 1) flat out vec3 v_ForegroundColour;
 // We only need the y component of this ratio, but opengl complains if this is a float.
 // Error is: "initializer of type int cannot be assigned to variable of type float"
@@ -45,10 +45,10 @@ void main() {
   // The magic numbers have the binary representation such that the shift and
   // mask operations are equivalent to looking up gl_VertexIndex in the tables
   // commented-out above.
-  float corner_offset_x = float(22 >> gl_VertexIndex & 1);
-  float corner_offset_y = 1.0 - float(52 >> gl_VertexIndex & 1);
+  float corner_offset_x = float((22 >> gl_VertexIndex) & 1);
+  float corner_offset_y = float((52 >> gl_VertexIndex) & 1);
   vec2 corner_offset = vec2(corner_offset_x, corner_offset_y);
-  v_BackgroundColour = a_BackgroundColour;
+  v_BackgroundColour = a_BackgroundColour * (float(gl_VertexIndex) / 5.0);
   v_ForegroundColour = a_ForegroundColour;
   v_Underline = a_Underline;
   vec2 cell_size = u_CellSizeRelativeToWindow;
