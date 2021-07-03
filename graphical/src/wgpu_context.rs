@@ -130,6 +130,43 @@ struct Setup {
     queue: wgpu::Queue,
 }
 
+async fn request_adapter_for_backend(
+    backend: wgpu::BackendBit,
+    window: &winit::window::Window,
+) -> Result<
+    (
+        wgpu::Adapter,
+        wgpu::Instance,
+        wgpu::Surface,
+        wgpu::Device,
+        wgpu::Queue,
+    ),
+    String,
+> {
+    let power_preference = wgpu::PowerPreference::default();
+    let instance = wgpu::Instance::new(backend);
+    let surface = unsafe { instance.create_surface(window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference,
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .ok_or_else(|| "No suitable GPU adapters found on the system!".to_string())?;
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+            },
+            None,
+        )
+        .await
+        .map_err(|e| format!("Unable to find a suitable GPU adapter! ({:?})", e))?;
+    Ok((adapter, instance, surface, device, queue))
+}
+
 async fn setup(title: &str, window_dimensions: Dimensions<NumPixels>, resizable: bool) -> Setup {
     let event_loop = winit::event_loop::EventLoop::new();
     let window_builder = winit::window::WindowBuilder::new().with_title(title);
@@ -143,28 +180,23 @@ async fn setup(title: &str, window_dimensions: Dimensions<NumPixels>, resizable:
             .with_resizable(resizable)
     };
     let window = window_builder.build(&event_loop).unwrap();
-    let backend = wgpu::BackendBit::GL;
-    let power_preference = wgpu::PowerPreference::default();
-    let instance = wgpu::Instance::new(backend);
-    let surface = unsafe { instance.create_surface(&window) };
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference,
-            compatible_surface: Some(&surface),
-        })
-        .await
-        .expect("No suitable GPU adapters found on the system!");
-    let (device, queue) = adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::default(),
-            },
-            None,
-        )
-        .await
-        .expect("Unable to find a suitable GPU adapter!");
+    let (adapter, instance, surface, device, queue) = match request_adapter_for_backend(
+        wgpu::BackendBit::PRIMARY,
+        &window,
+    )
+    .await
+    {
+        Ok(x) => x,
+        Err(message) => {
+            log::error!(
+                "Failed to initialize primary backend: {}\nFalling back to secondary backend....",
+                message
+            );
+            request_adapter_for_backend(wgpu::BackendBit::SECONDARY, &window)
+                .await
+                .expect("Failed to initialize secondary backend!")
+        }
+    };
     Setup {
         window,
         event_loop,
