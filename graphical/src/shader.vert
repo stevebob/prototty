@@ -48,7 +48,21 @@ void main() {
   float corner_offset_x = float((22 >> gl_VertexIndex) & 1);
   float corner_offset_y = float((52 >> gl_VertexIndex) & 1);
   vec2 corner_offset = vec2(corner_offset_x, corner_offset_y);
-  v_BackgroundColour = a_BackgroundColour * (float(gl_VertexIndex) / 5.0);
+  vec3 bg = vec3(0,0,0);
+  if (gl_VertexIndex == 0) {
+    bg = vec3(1,0,0);
+  } else if (gl_VertexIndex == 1) {
+    bg = vec3(0,1,0);
+  } else if (gl_VertexIndex == 2) {
+    bg = vec3(0,0,1);
+  } else if (gl_VertexIndex == 3) {
+    bg = vec3(1,1,0);
+  } else if (gl_VertexIndex == 4) {
+    bg = vec3(1,0,1);
+  } else if (gl_VertexIndex == 5) {
+    bg = vec3(0,1,1);
+  }
+  v_BackgroundColour = bg;
   v_ForegroundColour = a_ForegroundColour;
   v_Underline = a_Underline;
   vec2 cell_size = u_CellSizeRelativeToWindow;

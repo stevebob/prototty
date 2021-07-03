@@ -142,7 +142,7 @@ async fn setup() -> Setup {
     let event_loop = winit::event_loop::EventLoop::new();
     let builder = winit::window::WindowBuilder::new();
     let window = builder.build(&event_loop).unwrap();
-    let backend = wgpu::BackendBit::GL;
+    let backend = wgpu::BackendBit::PRIMARY;
     let power_preference = wgpu::PowerPreference::default();
     let instance = wgpu::Instance::new(backend);
     let (size, surface) = unsafe {
